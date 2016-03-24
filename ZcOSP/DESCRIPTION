@@ -1,0 +1,12 @@
+Package: ZcOSP
+Version: 0.0.1
+Date: 2015-10-09
+Title: Zc OSP Analysis
+Author: Jeff Laake <jeff.laake@noaa.gov>
+Description: This package provides code to evaluate OSP for Zalophus
+Depends:
+    R (>= 2.12.0)
+LazyLoad: yes
+License: GPL version 2 or later
+Maintainer: Jeff Laake <Jeff.Laake@noaa.gov>
+RoxygenNote: 5.0.1
