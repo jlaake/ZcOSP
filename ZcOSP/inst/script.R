@@ -1,3 +1,4 @@
+library(ZcOSP)
 library(RMark)
 library(splines)
 library(lme4)
@@ -17,7 +18,7 @@ get_Scoef=function(nreps,model)
 	return(Phi_rep)
 }
 
-get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE)
+get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE,which=NULL,reps=10)
 {
 	K<-250000  
 	z$N=NULL
@@ -30,7 +31,7 @@ get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE)
 	models=fitmixed(fixed.f=fixed,random.f=list(init_model$best.r),data=z[z$time!=2014,])
 	
 	# loop over model that may have N/K in it
-	for(i in 1:4)
+	for(i in 1:reps)
 	{
 		z$N=NULL
 		Ndf=data.frame(time=factor(1987:2014),N=apply(zcpop,3,sum)[-(1:12)])
@@ -107,7 +108,11 @@ get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE)
 		Sm[1,]=Sm[1,]^(11/12)
 		Sm=Sm[-25,]
 		Sf=Sf[-25,]
-		initial=age_dist(Sf,Sm,pups=pup_counts[1])
+		initial=age_dist(Sf,Sm,pups=pup_counts[1])	
+		birth_param=get_estimates_br(zcpop,DDT=get_DDT(),which=which,predict=TRUE)
+		if(debug)cat("\n",birth_param$br_coef)
+		f4plus=apply(zcpop[1,5:24,],2,sum)
+		pup_counts[4:6]=birth_param$br[4:6]*f4plus[4:6]
 		res=project_pop(pup_counts[-41],Sf,Sm,stochastic=FALSE,initial=initial)
 		zcpop=res$zcpop
 		K =res$stats["maxsmN"]
@@ -115,7 +120,7 @@ get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE)
 	}
 	if(stochastic)
 		res=project_pop(pup_counts[-41],Sf,Sm,stochastic=TRUE,initial=initial)
-	return(list(res=res,mod=mod))
+	return(list(res=res,mod=mod,birth_vc=birth_param$vc))
 }
 
 get_DDT=function(stochastic=FALSE)
@@ -134,7 +139,7 @@ get_DDT=function(stochastic=FALSE)
 	return(DDT)
 }		
 
-get_estimates_br=function(zcpop,DDT,stochastic=FALSE)
+get_estimates_br=function(zcpop,DDT,stochastic=FALSE,which=NULL,predict=FALSE)
 {	
 	# compute predicted DDT values over time from values measured for females in 1971,1991 and 2002
 	
@@ -158,13 +163,14 @@ get_estimates_br=function(zcpop,DDT,stochastic=FALSE)
 	mod_SST=suppressWarnings(optimx(par=par,br_fit,method=c("nlminb"),nat_formula=nat_formula,natality=natality))
 	mod_SST$AICc=AICvalue
 	mod_SST$npar=npar
-	
+	if(debug&(is.null(which)||which==1))cat("birth neglnl=",br_fit(c(mod_SST$p1,mod_SST$p2,mod_SST$p3),nat_formula,natality))
 	#SST +DDT
 	par=c(mod_SST$p1,mod_SST$p2,mod_SST$p3,0 )
 	nat_formula=~SST+DDT
 	mod_SSTDDT=suppressWarnings(optimx(par=par,br_fit,method=c("nlminb"),nat_formula=nat_formula,natality=natality))
 	mod_SSTDDT$AICc=AICvalue
 	mod_SSTDDT$npar=npar
+	if(debug&(is.null(which)||which==2))cat("birth neglnl=",br_fit(c(mod_SSTDDT$p1,mod_SSTDDT$p2,mod_SSTDDT$p3,mod_SSTDDT$p4),nat_formula,natality))
 	
 	#SST + NK
 	par=c(mod_SST$p1,mod_SST$p2,mod_SST$p3,0 )
@@ -172,6 +178,7 @@ get_estimates_br=function(zcpop,DDT,stochastic=FALSE)
 	mod_SSTNK=suppressWarnings(optimx(par,br_fit,method=c("nlminb"),nat_formula=nat_formula,natality=natality))
 	mod_SSTNK$AICc=AICvalue
 	mod_SSTNK$npar=npar
+	if(debug&(is.null(which)||which==3))cat("birth neglnl=",br_fit(c(mod_SSTNK$p1,mod_SSTNK$p2,mod_SSTNK$p3,mod_SSTNK$p4),nat_formula,natality))
 	
 	#  SST +DDT +NK
 	par=c(mod_SSTDDT$p1,mod_SSTDDT$p2,mod_SSTDDT$p3,mod_SSTDDT$p4,0 )
@@ -179,18 +186,40 @@ get_estimates_br=function(zcpop,DDT,stochastic=FALSE)
 	mod_SSTDDTNK=suppressWarnings(optimx(par,br_fit,method=c("nlminb"),nat_formula=nat_formula,natality=natality))
 	mod_SSTDDTNK$AICc=AICvalue
 	mod_SSTDDTNK$npar=npar
+	if(debug&(is.null(which)||which==4))cat("birth neglnl=",br_fit(c(mod_SSTDDTNK$p1,mod_SSTDDTNK$p2,mod_SSTDDTNK$p3,mod_SSTDDTNK$p4,mod_SSTDDTNK$p5),nat_formula,natality))
 	
 	whichbest=which.min(c(mod_SST$AICc,mod_SSTDDT$AICc,mod_SSTNK$AICc,mod_SSTDDTNK$AICc))
-	#if(stochastic)whichbest=4
+	if(!is.null(which))whichbest=which
 	if(whichbest==1)
+	{
 		br_coef=c(mod_SST$p1,mod_SST$p2,mod_SST$p3,0,0)
+		vc=solve(attr(mod_SST,"details")[,"nhatend"][[1]])
+	}
 	if(whichbest==2)
+	{
 		br_coef=c(mod_SSTDDT$p1,mod_SSTDDT$p2,mod_SSTDDT$p3,mod_SSTDDT$p4,0)
+		vc=solve(attr(mod_SSTDDT,"details")[,"nhatend"][[1]])
+	}
 	if(whichbest==3)
+	{
 		br_coef=c(mod_SSTNK$p1,mod_SSTNK$p2,mod_SSTNK$p3,0,mod_SSTNK$p4)
+		vc=solve(attr(mod_SSTNK,"details")[,"nhatend"][[1]])
+	}
 	if(whichbest==4)
+	{
 		br_coef=c(mod_SSTDDTNK$p1,mod_SSTDDTNK$p2,mod_SSTDDTNK$p3,mod_SSTDDTNK$p4,mod_SSTDDTNK$p5)
-	return(br_coef=br_coef)
+		vc=solve(attr(mod_SSTDDTNK,"details")[,"nhatend"][[1]])
+	}
+	if(!predict)
+		return(br_coef=br_coef)
+	else
+	{
+		gamma=br_coef[1]
+	    beta_nat=br_coef[2:length(br_coef)]
+	    dm_nat=model.matrix(nat_formula,natality)
+	    br=plogis(dm_nat%*%beta_nat)
+		return(list(br_coef=br_coef,br=br,vc=vc))
+	}
 }
 
 
@@ -202,10 +231,8 @@ br_fit=function(par,nat_formula,natality)
 	br<-plogis(dm_nat%*%beta_nat)
 	sigmasq=natality$Nf*br*(1-br)*(exp(gamma)+1)
 	neglnl=sum((natality$Pups-natality$Nf*br)^2/(2*sigmasq) +log(sqrt(sigmasq)))
-	#cat("neglnl= ",neglnl)	
 	npar<<-length(par)
 	AICvalue<<-2*as.numeric(neglnl)+2*npar + 2*npar*(npar+1)/(nrow(dm_nat)-npar+1)
-	#cat("\nAICc= ",AICvalue)
 	return(as.numeric(neglnl))
 }
 
@@ -382,6 +409,7 @@ NLS.PT<-function (panel,MaxIter=5000,upper=NULL,...)
 ########################End of Functions #######################################################################
 
 
+debug=FALSE
 #attach bycatch data
 data(bycatch)
 # get PupCounts and compute values for SNI for 1985 to 1989
@@ -393,8 +421,6 @@ data(best) # loads into model
 data(SST)
 data(zcddl)
 data(zcpop)
-model$output="best"
-model$chat=1.12
 predlist=make_predictions(model,zc.ddl)
 pp=predlist$pp
 key.estimates=predlist$key.estimates
@@ -421,7 +447,7 @@ fixed=list(
 		"link~sex * bs(Age) + OcttoJuneSSTAnomalies:pup + yearling:JulytoJuneSSTAnomalies + twothree:JulytoJuneSSTAnomalies + pup:NK + yearling:NK + pup:weight + yearling:weight",
 		"link~sex * bs(Age) + OcttoJuneSSTAnomalies:pup + yearling:JulytoJuneSSTAnomalies +  pup:NK + yearling:NK + pup:weight + yearling:weight")
 init_model=fitmixed(fixed=fixed[1],random=randomlist,z)
-popn=get_estimates_pop(z,zcpop,fixed,init_model,pup_counts)
+popn=get_estimates_pop(z,zcpop,fixed,init_model,pup_counts,which=4)
 birth=get_estimates_br(popn$res$zcpop,DDT=get_DDT())
 logistic=get_logistic_fit(popn$res$zcpop,removals=get_removals(bycatch))
 
