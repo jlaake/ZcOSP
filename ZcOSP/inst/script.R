@@ -29,10 +29,14 @@ get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE,
 	z$seq=NULL
 	z$NK=z$N/K
 	models=fitmixed(fixed.f=fixed,random.f=list(init_model$best.r),data=z[z$time!=2014,])
+	tt=1:7
+	r=coef(lm(log(pup_counts[1:7])~tt))[2]
 	
 	# loop over model that may have N/K in it
 	for(i in 1:reps)
 	{
+		tt=1:7
+		r=coef(lm(log(pup_counts[1:7])~tt))[2]
 		z$N=NULL
 		Ndf=data.frame(time=factor(1987:2014),N=apply(zcpop,3,sum)[-(1:12)])
 		z$seq=1:nrow(z)
@@ -47,7 +51,7 @@ get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE,
 		{
 			if(i==1)
 			{
-				sd=sqrt(diag(VarCorr(mod)$time))
+				sd=sqrt(diag(VarCorr(popn$mod)$time))
 				puperr=rnorm(39,0,sd[1])
 				yrerr=rnorm(39,0,sd[2])
 				twopluserr=rnorm(39,0,sd[3])
@@ -108,18 +112,18 @@ get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE,
 		Sm[1,]=Sm[1,]^(11/12)
 		Sm=Sm[-25,]
 		Sf=Sf[-25,]
-		initial=age_dist(Sf,Sm,pups=pup_counts[1])	
+		initial=age_dist(Sf,Sm,pups=pup_counts[1],r=r)	
 		birth_param=get_estimates_br(zcpop,DDT=get_DDT(),which=which,predict=TRUE)
 		if(debug)cat("\n",birth_param$br_coef)
 		f4plus=apply(zcpop[1,5:24,],2,sum)
 		pup_counts[4:6]=birth_param$br[4:6]*f4plus[4:6]
-		res=project_pop(pup_counts[-41],Sf,Sm,stochastic=FALSE,initial=initial)
+		res=project_pop(pup_counts[-41],Sf,Sm,stochastic=FALSE,initial=initial,r=r)
 		zcpop=res$zcpop
 		K =res$stats["maxsmN"]
-		if(debug)cat("likelihood = ",logLik(mod)," K = ", K)
+		if(debug)cat("likelihood = ",logLik(mod)," K = ", K," r =",r)
 	}
 	if(stochastic)
-		res=project_pop(pup_counts[-41],Sf,Sm,stochastic=TRUE,initial=initial)
+		res=project_pop(pup_counts[-41],Sf,Sm,stochastic=TRUE,initial=initial,r=r)
 	return(list(res=res,mod=mod,birth_vc=birth_param$vc))
 }
 
@@ -139,7 +143,7 @@ get_DDT=function(stochastic=FALSE)
 	return(DDT)
 }		
 
-get_estimates_br=function(zcpop,DDT,stochastic=FALSE,which=NULL,predict=FALSE)
+get_estimates_br=function(zcpop,DDT,stochastic=FALSE,which=NULL,predict=FALSE,model.average=FALSE)
 {	
 	# compute predicted DDT values over time from values measured for females in 1971,1991 and 2002
 	
@@ -187,8 +191,10 @@ get_estimates_br=function(zcpop,DDT,stochastic=FALSE,which=NULL,predict=FALSE)
 	mod_SSTDDTNK$AICc=AICvalue
 	mod_SSTDDTNK$npar=npar
 	if(debug&(is.null(which)||which==4))cat("birth neglnl=",br_fit(c(mod_SSTDDTNK$p1,mod_SSTDDTNK$p2,mod_SSTDDTNK$p3,mod_SSTDDTNK$p4,mod_SSTDDTNK$p5),nat_formula,natality))
-	
-	whichbest=which.min(c(mod_SST$AICc,mod_SSTDDT$AICc,mod_SSTNK$AICc,mod_SSTDDTNK$AICc))
+	AICcvalues=c(mod_SST$AICc,mod_SSTDDT$AICc,mod_SSTNK$AICc,mod_SSTDDTNK$AICc)
+	whichbest=which.min(AICcvalues)
+	wts=AICcvalues-min(AICcvalues)
+	wts=exp(-.5*wts)/sum(exp(-.5*wts))
 	if(!is.null(which))whichbest=which
 	if(whichbest==1)
 	{
@@ -210,8 +216,13 @@ get_estimates_br=function(zcpop,DDT,stochastic=FALSE,which=NULL,predict=FALSE)
 		br_coef=c(mod_SSTDDTNK$p1,mod_SSTDDTNK$p2,mod_SSTDDTNK$p3,mod_SSTDDTNK$p4,mod_SSTDDTNK$p5)
 		vc=solve(attr(mod_SSTDDTNK,"details")[,"nhatend"][[1]])
 	}
+	mavg=c(mod_SST$p1,mod_SST$p2,mod_SST$p3,0,0)*wts[1]+c(mod_SSTDDT$p1,mod_SSTDDT$p2,mod_SSTDDT$p3,mod_SSTDDT$p4,0)*wts[2]+
+		c(mod_SSTNK$p1,mod_SSTNK$p2,mod_SSTNK$p3,0,mod_SSTNK$p4)*wts[3]+c(mod_SSTDDTNK$p1,mod_SSTDDTNK$p2,mod_SSTDDTNK$p3,mod_SSTDDTNK$p4,mod_SSTDDTNK$p5)*wts[4]
 	if(!predict)
-		return(br_coef=br_coef)
+		if(model.average)
+		    return(br_coef=mavg)
+	    else
+			return(br_coef=br_coef)
 	else
 	{
 		gamma=br_coef[1]
@@ -408,7 +419,7 @@ NLS.PT<-function (panel,MaxIter=5000,upper=NULL,...)
 
 ########################End of Functions #######################################################################
 
-
+nreps=1000
 debug=FALSE
 #attach bycatch data
 data(bycatch)
@@ -427,7 +438,6 @@ key.estimates=predlist$key.estimates
 z=pp$real
 z$py=z$pup+z$yearling
 z$oneplus=ifelse(z$age==0,0,1)
-z=droplevels(z)
 z$link=RMark:::compute.links.from.reals(pp$real$real,model,vcv.real=pp$vcv.real)$estimates
 z$N=NULL
 Ndf=data.frame(time=factor(1987:2014),N=apply(zcpop,3,sum)[-(1:12)])
@@ -437,15 +447,21 @@ z=z[order(z$seq),]
 z$seq=NULL
 K=250000
 z$NK=z$N/K
+z=z[z$time!=2014,]
+z=droplevels(z)
 data(Phidata)
 SavePhiData=Phidata
-randomlist=list("-1+pup+yearling+twoplus|time","-1+py+twoplus|time","-1+pup+oneplus|time","1|time")
+randomlist=list("-1+pup+yearling+twoplus|time","-1+pup+oneplus|time","1|time")
 fixed=list(	
 		"link~sex * bs(Age) + OcttoJuneSSTAnomalies:pup + yearling:JulytoJuneSSTAnomalies + twothree:JulytoJuneSSTAnomalies + fourplus:JulytoJuneSSTAnomalies + pup:NK +   yearling:NK + twothree:NK + fourplus:NK + pup:weight + yearling:weight",
 		"link~sex * bs(Age) + OcttoJuneSSTAnomalies:pup + yearling:JulytoJuneSSTAnomalies + twothree:JulytoJuneSSTAnomalies+  fourplus:JulytoJuneSSTAnomalies + pup:NK + yearling:NK + twothree:NK + pup:weight + yearling:weight",
 		"link~sex * bs(Age) + OcttoJuneSSTAnomalies:pup + yearling:JulytoJuneSSTAnomalies + twothree:JulytoJuneSSTAnomalies + pup:NK + yearling:NK + twothree:NK + pup:weight + yearling:weight",
 		"link~sex * bs(Age) + OcttoJuneSSTAnomalies:pup + yearling:JulytoJuneSSTAnomalies + twothree:JulytoJuneSSTAnomalies + pup:NK + yearling:NK + pup:weight + yearling:weight",
 		"link~sex * bs(Age) + OcttoJuneSSTAnomalies:pup + yearling:JulytoJuneSSTAnomalies +  pup:NK + yearling:NK + pup:weight + yearling:weight")
+#fixed=list(	
+#		"link~ JulytoJuneSSTAnomalies + NK","link~ JulytoJuneSSTAnomalies + NK")
+#randomlist=list("1|time")
+
 init_model=fitmixed(fixed=fixed[1],random=randomlist,z)
 popn=get_estimates_pop(z,zcpop,fixed,init_model,pup_counts,which=4)
 birth=get_estimates_br(popn$res$zcpop,DDT=get_DDT())
@@ -469,7 +485,7 @@ for(i in 1:nreps)
 	z=z[order(z$seq),]
 	z$seq=NULL
 	z$NK=z$N/K
-	popn.boot[[i]]=get_estimates_pop(z,zcpop,fixed,init_model,pup_counts=Nlist[[i]],stochastic=TRUE)
+	popn.boot[[i]]=get_estimates_pop(z,zcpop,fixed,init_model,pup_counts=Nlist[[i]],stochastic=TRUE,reps=7)
 }
 
 
@@ -479,6 +495,14 @@ for(i in 1:nreps)
 	cat("\n",i)
 	br.boot[[i]]=get_estimates_br(popn.boot[[i]]$res$zcpop,DDT=get_DDT(stochastic=TRUE),stochastic=TRUE)
 	cat("\n",br.boot[[i]])
+}
+
+br.boot.mavg=vector("list",length=nreps)
+for(i in 1:nreps)
+{
+	cat("\n",i)
+	br.boot.mavg[[i]]=get_estimates_br(popn.boot[[i]]$res$zcpop,DDT=get_DDT(stochastic=TRUE),stochastic=TRUE,model.average=TRUE)
+	cat("\n",br.boot.mavg[[i]])
 }
 
 logistic.boot=vector("list",length=nreps)
