@@ -12,9 +12,14 @@ library(mvtnorm)
 get_Scoef=function(nreps,model)
 {
 	which.beta=grep("S:",rownames(model$results$beta))
-	Phi_coef=model$results$beta$estimate[which.beta]
-	Phi_vcv= model$results$beta.vcv[which.beta,which.beta]
-	Phi_rep = rmvnorm(nreps, Phi_coef, Phi_vcv)
+	# remove 2015 which are not estimable &remove 1996 2+ male and then replace with 1995 value
+	rep_index=c(which(rownames(model$results$beta)[which.beta]=="S:timebin1996:p89plus:male:twoplus"),grep("2015",rownames(model$results$beta)[which.beta]))
+
+	Phi_coef=model$results$beta$estimate[which.beta][-rep_index]
+	Phi_vcv= model$results$beta.vcv[which.beta,which.beta][-rep_index,-rep_index]
+	Phi_rep=matrix(NA,nrow=nreps,ncol=length(which.beta))
+	Phi_rep[,which.beta[-rep_index]] = rmvnorm(nreps, Phi_coef, Phi_vcv)
+	Phi_rep[,rep_index]=Phi_rep[,rep_index-1]
 	return(Phi_rep)
 }
 
@@ -114,9 +119,9 @@ get_estimates_pop=function(z,zcpop,fixed,init_model,pup_counts,stochastic=FALSE,
 		Sf=Sf[-25,]
 		initial=age_dist(Sf,Sm,pups=pup_counts[1],r=r)	
 		birth_param=get_estimates_br(zcpop,DDT=get_DDT(),which=which,predict=TRUE)
-		if(debug)cat("\n",birth_param$br_coef)
-		f4plus=apply(zcpop[1,5:24,],2,sum)
-		pup_counts[4:6]=birth_param$br[4:6]*f4plus[4:6]
+#		if(debug)cat("\n",birth_param$br_coef)
+#		f4plus=apply(zcpop[1,5:24,],2,sum)
+#		pup_counts[4:6]=birth_param$br[4:6]*f4plus[4:6]
 		res=project_pop(pup_counts[-41],Sf,Sm,stochastic=FALSE,initial=initial,r=r)
 		zcpop=res$zcpop
 		K =res$stats["maxsmN"]
@@ -225,7 +230,8 @@ get_estimates_br=function(zcpop,DDT,stochastic=FALSE,which=NULL,predict=FALSE,mo
 			return(br_coef=br_coef)
 	else
 	{
-		gamma=br_coef[1]
+	    if(model.average) br_coef=mavg
+		  gamma=br_coef[1]
 	    beta_nat=br_coef[2:length(br_coef)]
 	    dm_nat=model.matrix(nat_formula,natality)
 	    br=plogis(dm_nat%*%beta_nat)
@@ -306,6 +312,33 @@ get_logistic_fit=function(zcpop,start=NULL,removals=NULL)
 	return(par_N)
 }
 
+
+plot_logistic_fit=function(zcpop,par_N,boot,removals=NULL)
+{
+	data(Phidata)
+	SST=Phidata$JulytoJuneSSTAnomalies[Phidata$sex=="F"&Phidata$Age==0]
+	N=apply(zcpop,3,sum)
+	if(is.null(removals))
+		removals=rep(0,40)
+	panel=list(y.obs=N,time.index=1:40,removals=removals)
+	panel$SST=SST
+	pred=project.PT(par_N[1],par_N[2],par_N[3],par_N[4],par_N[5],1:40,SST=panel$SST,removals=removals)
+	plot(1975:2014,pred,type="l",ylab="Total population size",xlab="Year",xaxp=c(1975,2014,39),ylim=c(60000,320000))
+	points(1975:2014,panel$y.obs)
+	bounds=t(sapply(logistic.boot, function(x) project.PT(x[1],x[2],x[3],x[4],x[5],1:40,SST=panel$SST,removals=removals)))
+	lowerbounds=apply(bounds,2, function(x) sort(x)[.025*nreps])
+	upperbounds=apply(bounds,2, function(x) sort(x)[.975*nreps])
+	lines(1975:2014,lowerbounds,lty=2)
+	lines(1975:2014,upperbounds,lty=2)
+	invisible()
+}
+
+plot_error_bars=function(popn.boot)
+{
+	limits=apply(do.call(rbind,lapply(popn.boot,function(x)apply(x$res$zcpop,3,sum))),2,function(x)c(sort(x)[.025*nreps],sort(x)[.975*nreps]))
+	for(i in 1:ncol(limits))
+		lines(c(1974+i,1974+i),limits[,i])
+}
 
 fitmixed=function(fixed.f,random.f,data,save.model=TRUE,...)
 {
@@ -423,12 +456,25 @@ nreps=1000
 debug=FALSE
 #attach bycatch data
 data(bycatch)
-# get PupCounts and compute values for SNI for 1985 to 1989
+# get PupCounts 
 pup_count_list=make_pup_counts(nreps)
 pup_counts=pup_count_list$pup_counts
+# This is nreps bootstraps of the imputed counts with the actual counts
 Nlist=pup_count_list$Nlist
 # Get estimated S values and all estimates
 data(best) # loads into model
+# modify estimates to handle boundary parameters
+which.beta=grep("S:",rownames(model$results$beta))
+save.which=which.beta
+# remove 2015 which are not estimable and not used; replace with 2014
+which.beta[which.beta%in%grep("2015",rownames(model$results$beta)[which.beta])]=grep("2015",rownames(model$results$beta)[which.beta])-1
+# remove 1996 2+ male and then replace with 1995 value in Phi_rep
+which.beta[which.beta==104]=103
+model$results$beta[save.which,]=model$results$beta[which.beta,]
+model$results$beta.vcv[save.which,save.which]=model$results$beta.vcv[which.beta,which.beta]
+Phi_coef=model$results$beta$estimate[which.beta]
+Phi_vcv= model$results$beta.vcv[which.beta,which.beta]
+
 data(SST)
 data(zcddl)
 data(zcpop)
@@ -462,9 +508,14 @@ fixed=list(
 #		"link~ JulytoJuneSSTAnomalies + NK","link~ JulytoJuneSSTAnomalies + NK")
 #randomlist=list("1|time")
 
+# load pup counts into population structure
+zcpop[1,1,]=pup_counts[1:40]/2
+zcpop[2,1,]=pup_counts[1:40]/2
+
 init_model=fitmixed(fixed=fixed[1],random=randomlist,z)
 popn=get_estimates_pop(z,zcpop,fixed,init_model,pup_counts,which=4)
-birth=get_estimates_br(popn$res$zcpop,DDT=get_DDT())
+birth=get_estimates_br(popn$res$zcpop,DDT=get_DDT(),model.average=TRUE)
+birth_predictions=get_estimates_br(popn$res$zcpop,DDT=get_DDT(),model.average=TRUE,predict=T)
 logistic=get_logistic_fit(popn$res$zcpop,removals=get_removals(bycatch))
 
 popn.boot=vector("list",length=nreps)
@@ -503,6 +554,13 @@ for(i in 1:nreps)
 	cat("\n",i)
 	br.boot.mavg[[i]]=get_estimates_br(popn.boot[[i]]$res$zcpop,DDT=get_DDT(stochastic=TRUE),stochastic=TRUE,model.average=TRUE)
 	cat("\n",br.boot.mavg[[i]])
+}
+
+br.pred.mavg=vector("list",length=nreps)
+for(i in 1:nreps)
+{
+  cat("\n",i)
+  br.pred.mavg[[i]]=get_estimates_br(popn.boot[[i]]$res$zcpop,DDT=get_DDT(stochastic=TRUE),stochastic=TRUE,model.average=TRUE,predict=TRUE)$br
 }
 
 logistic.boot=vector("list",length=nreps)

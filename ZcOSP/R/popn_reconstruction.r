@@ -196,13 +196,6 @@ make_pup_counts=function(nreps)
 	PupCounts$US_PupCnt[11:15]=PupCounts$SMI_PupCnt[11:15]+PupCounts$SNI_PupCnt[11:15]+PupCounts$SBI_PupCnt[11:15]+
 			PupCounts$SCI_PupCnt[11:15]
 	save_PupCounts=PupCounts
-#	incyears=c(1975:1977,1981:1984,1990:1997)
-#	snicount=PupCounts[PupCounts$Year%in%incyears,c("SNI_PupCnt")]
-#	nonsnicount=rowSums(PupCounts[PupCounts$Year%in%incyears,c("SMI_PupCnt","SCI_PupCnt","SBI_PupCnt")])
-#	mod=lm(log(snicount)~log(nonsnicount))
-#	sni_pred=predict(mod,newdata=data.frame(nonsnicount=rowSums(PupCounts[PupCounts$Year%in%1985:1989,c("SMI_PupCnt","SCI_PupCnt","SBI_PupCnt")])),se.fit=TRUE)	
-#	PupCounts$SNI_PupCnt[PupCounts$Year%in%1985:1989]=sni_pred$fit
-#	PupCounts$US_PupCnt[PupCounts$Year%in%1985:1989]=rowSums(PupCounts[PupCounts$Year%in%1985:1989,c("SMI_PupCnt","SNI_PupCnt","SCI_PupCnt","SBI_PupCnt","Other_PupCnt")])
 # now predict number with linear regression between 1978 to 1980 using data from 1975-77 and 1981-2001
 	incyears=c(1975:1977,1981:2001)
 	mod=lm(log(US_PupCnt)~Year,data=PupCounts[PupCounts$Year%in%incyears,])
@@ -210,8 +203,11 @@ make_pup_counts=function(nreps)
 	PupCounts$US_PupCnt[PupCounts$Year%in%1978:1980]=exp(total_pred$fit+total_pred$residual.scale^2/2)
 	pup_counts=PupCounts$US_PupCnt
 # finally compute vaues for 2009, 2010 and 2015 from ground counts at SMI and SNI(partial) 
-	smi_counts=c(788,873,508)+c(12018,14258,15998)
-	sni_counts=c(6328,4906,3064)-c(74,62,0)
+#   note that in PupCounts, smi are MML ground counts and sni are MML counts for part of SMI from 32-54
+	#smi_counts=c(788,873,508)+c(12018,14258,15998)
+	#sni_counts=c(6328,4906,3064)-c(74,62,0)
+	smi_counts=PupCounts$SMI_PupCnt[PupCounts$Year%in%c(2009,2010,2015)]
+	sni_counts=PupCounts$SNI_PupCnt[PupCounts$Year%in%c(2009,2010,2015)]
 # compute proportion in area 32-54 to expand to total from ground count
 	data(SNIGroundProp)
 	ground_prop=SNIGroundProp$Area32.54/SNIGroundProp$Total
@@ -225,14 +221,10 @@ make_pup_counts=function(nreps)
 	fromSNISMI_pred=predict(mod_SNISMI,newdata=data.frame(SMISNI_PupCnt=sni_counts/snitotal_pred$fit+smi_counts),se.fit=TRUE)
 	pup_counts[PupCounts$Year%in%c(2009,2010,2015)]=fromSNISMI_pred$fit
 # for error in counts need std errors from total_pred, snitotal_pred and fromSNISMI_pred
-# for prediction of 5 missing SNI totals
-	#slope_error=rt(nreps,df=sni_pred$df)
-	#errors_snipred=t(t(matrix(slope_error,nrow=nreps,ncol=5))*sni_pred$se.fit)
-	#errors_snipred=t(t(matrix(slope_error,nrow=nreps,ncol=5))*sni_pred$se.fit)+matrix(rnorm(5*nreps,0,sni_pred$residual.scale),ncol=5)
-	# for prediction of 1978-1980
+# for prediction of 1978-1980
 	slope_error=rt(nreps,df=total_pred$df)
 	errors_totalpred=t(t(matrix(slope_error,nrow=nreps,ncol=3))*total_pred$se.fit)
-	#errors_totalpred=t(t(matrix(slope_error,nrow=nreps,ncol=3))*total_pred$se.fit)+matrix(rnorm(3*nreps,0,total_pred$residual.scale),ncol=3)
+#errors_totalpred=t(t(matrix(slope_error,nrow=nreps,ncol=3))*total_pred$se.fit)+matrix(rnorm(3*nreps,0,total_pred$residual.scale),ncol=3)
 # both for prediction of 2009,2010,2015 from ground counts
 	slope_error=rt(nreps,df=df)
 	errors_snitotalpred=t(t(matrix(slope_error,nrow=nreps,ncol=3))*snitotal_pred$se.fit)+matrix(rnorm(3*nreps,0,snitotal_pred$residual.scale),ncol=3)
@@ -247,8 +239,6 @@ make_pup_counts=function(nreps)
 	for(i in 1:nreps)
 	{
 		PC=save_PupCounts
-		#PC$SNI_PupCnt[PC$Year%in%1985:1989]=exp(sni_pred$fit+errors_snipred[i,])
-		#PC$US_PupCnt[PC$Year%in%1985:1989]=rowSums(PC[PC$Year%in%1985:1989,c("SMI_PupCnt","SNI_PupCnt","SCI_PupCnt","SBI_PupCnt","Other_PupCnt")])
 		PC$US_PupCnt[PC$Year%in%1978:1980]=exp(total_pred$fit+errors_totalpred[i,]+total_pred$residual.scale^2/2)
 		PC$US_PupCnt[PC$Year%in%c(2009,2010,2015)]=fromSNISMI_pred$fit+errors_fromSNISMI[i,]
 		Nlist[[i]]=PC$US_PupCnt
