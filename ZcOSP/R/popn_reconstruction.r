@@ -202,45 +202,44 @@ make_pup_counts=function(nreps)
 	total_pred=predict(mod,newdata=data.frame(Year=1978:1980),se.fit=TRUE)
 	PupCounts$US_PupCnt[PupCounts$Year%in%1978:1980]=exp(total_pred$fit+total_pred$residual.scale^2/2)
 	pup_counts=PupCounts$US_PupCnt
-# finally compute vaues for 2009, 2010 and 2015 from ground counts at SMI and SNI(partial) 
-#   note that in PupCounts, smi are MML ground counts and sni are MML counts for part of SMI from 32-54
+# finally compute values for 2009, 2010 from ground counts at SMI and SNI(partial) 
+# note that in PupCounts, smi are MML ground counts and sni are MML counts for part of SMI from 32-54
 	#smi_counts=c(788,873,508)+c(12018,14258,15998)
 	#sni_counts=c(6328,4906,3064)-c(74,62,0)
-	smi_counts=PupCounts$SMI_PupCnt[PupCounts$Year%in%c(2009,2010,2015)]
-	sni_counts=PupCounts$SNI_PupCnt[PupCounts$Year%in%c(2009,2010,2015)]
+	smi_counts=PupCounts$SMI_PupCnt[PupCounts$Year%in%c(2009,2010)]
+	sni_counts=PupCounts$SNI_PupCnt[PupCounts$Year%in%c(2009,2010)]
 # compute proportion in area 32-54 to expand to total from ground count
 	data(SNIGroundProp)
 	ground_prop=SNIGroundProp$Area32.54/SNIGroundProp$Total
 	Year=I(SNIGroundProp$Year-1990)
 	mod=glm(ground_prop~poly(Year,3),family=gaussian(link="log"))
 	df= summary(mod)$df[2]
-	snitotal_pred=predict(mod,newdata=data.frame(Year=c(2009,2010,2015)-1990),type="response",se.fit=TRUE)
+	snitotal_pred=predict(mod,newdata=data.frame(Year=c(2009,2010)-1990),type="response",se.fit=TRUE)
 # from SMI count and SNI estimated total compute total US population from SNISMI-Total model
 	SMISNI_PupCnt=PupCounts$SMI_PupCnt+PupCounts$SNI_PupCnt
 	mod_SNISMI=lm(US_PupCnt~SMISNI_PupCnt,data=PupCounts)
-	fromSNISMI_pred=predict(mod_SNISMI,newdata=data.frame(SMISNI_PupCnt=sni_counts/snitotal_pred$fit+smi_counts),se.fit=TRUE)
-	pup_counts[PupCounts$Year%in%c(2009,2010,2015)]=fromSNISMI_pred$fit
+	fromSNISMI_pred=predict(mod_SNISMI,newdata=data.frame(SMISNI_PupCnt=c(sni_counts/snitotal_pred$fit+smi_counts,SMISNI_PupCnt[PupCounts$Year%in%c(2015,2019)])),se.fit=TRUE)
+	pup_counts[PupCounts$Year%in%c(2009,2010,2015,2019)]=fromSNISMI_pred$fit
 # for error in counts need std errors from total_pred, snitotal_pred and fromSNISMI_pred
 # for prediction of 1978-1980
 	slope_error=rt(nreps,df=total_pred$df)
 	errors_totalpred=t(t(matrix(slope_error,nrow=nreps,ncol=3))*total_pred$se.fit)
-#errors_totalpred=t(t(matrix(slope_error,nrow=nreps,ncol=3))*total_pred$se.fit)+matrix(rnorm(3*nreps,0,total_pred$residual.scale),ncol=3)
-# both for prediction of 2009,2010,2015 from ground counts
+# both for prediction of 2009,2010 from ground counts at SNI/SMI and for 2015, 2019 for missing some counts
 	slope_error=rt(nreps,df=df)
-	errors_snitotalpred=t(t(matrix(slope_error,nrow=nreps,ncol=3))*snitotal_pred$se.fit)+matrix(rnorm(3*nreps,0,snitotal_pred$residual.scale),ncol=3)
-	errors_fromSNISMI=matrix(0,nrow=nreps,ncol=3)
+	errors_snitotalpred=t(t(matrix(slope_error,nrow=nreps,ncol=2))*snitotal_pred$se.fit)+matrix(rnorm(2*nreps,0,snitotal_pred$residual.scale),ncol=2)
+	errors_fromSNISMI=matrix(0,nrow=nreps,ncol=4)
 	for(i in 1:nreps)
 	{
-		xx=predict(mod_SNISMI,newdata=data.frame(SMISNI_PupCnt=sni_counts/(snitotal_pred$fit+errors_snitotalpred[i,])+smi_counts),se.fit=TRUE)
+		xx=predict(mod_SNISMI,newdata=data.frame(SMISNI_PupCnt=c(sni_counts/(snitotal_pred$fit+errors_snitotalpred[i,])+smi_counts,SMISNI_PupCnt[PupCounts$Year%in%c(2015,2019)])),se.fit=TRUE)
 		slope_error=rt(1,df=fromSNISMI_pred$df)
-        errors_fromSNISMI[i,]=slope_error*xx$se.fit+rnorm(3,0,xx$residual.scale)
+    errors_fromSNISMI[i,]=slope_error*xx$se.fit+rnorm(4,0,xx$residual.scale)
 	}
 	Nlist=vector("list",length=nreps)
 	for(i in 1:nreps)
 	{
 		PC=save_PupCounts
 		PC$US_PupCnt[PC$Year%in%1978:1980]=exp(total_pred$fit+errors_totalpred[i,]+total_pred$residual.scale^2/2)
-		PC$US_PupCnt[PC$Year%in%c(2009,2010,2015)]=fromSNISMI_pred$fit+errors_fromSNISMI[i,]
+		PC$US_PupCnt[PC$Year%in%c(2009,2010,2015,2019)]=fromSNISMI_pred$fit+errors_fromSNISMI[i,]
 		Nlist[[i]]=PC$US_PupCnt
 	}
 	return(list(pup_counts=pup_counts,Nlist=Nlist))
